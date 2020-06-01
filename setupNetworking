@@ -1,0 +1,402 @@
+#!/bin/bash
+#Prios
+#League IPs = congstar, vodafone, eth0
+#Twitch IPs = eth0, funk
+#TS = vodafone, funk, eth0
+#Default Route = funk, eth0
+
+#Logging
+
+exec > >(tee -i /tmp/netlog)
+exec 2>&1
+
+#TODO rewrite this whole script logic in rust 
+
+USE_UDP_ROUTING=1
+
+NET_DIR=/sys/class/net/
+APPLE_GATEWAY=172.20.10.1
+ADSL_1_NIC_GATEWAY=192.168.178.1
+HOME_SUBNET=192.168.178.0
+
+LTE_3_NIC=congstar
+LTE_1_NIC=funk
+LTE_2_NIC=vodafone
+ADSL_1_NIC=eth0
+
+declare -A configs
+configs[$LTE_3_NIC]=$APPLE_GATEWAY
+configs[$LTE_1_NIC]=$APPLE_GATEWAY
+configs[$LTE_2_NIC]=$APPLE_GATEWAY
+configs[$ADSL_1_NIC]=$ADSL_1_NIC_GATEWAY
+
+declare -A ips
+ips[$LTE_3_NIC]="172.20.10.5/28"
+ips[$LTE_1_NIC]="172.20.10.2/28"
+ips[$LTE_2_NIC]="172.20.10.4/28"
+ips[$ADSL_1_NIC]="192.168.178.46/24"
+
+telegramString=""
+
+#NICS
+interfaces=(
+	$LTE_3_NIC \
+	$LTE_1_NIC \
+	$LTE_2_NIC \
+	$ADSL_1_NIC
+)
+
+#Priorities for udp
+udprpios=(
+	$LTE_3_NIC \
+	$LTE_2_NIC\
+	$ADSL_1_NIC \
+	$LTE_1_NIC
+)
+
+#IP Ranges for routing
+
+league=(
+    "162.249.72.0/24" \
+    "162.249.73.0/24" \
+    "162.249.74.0/24" \
+    "162.249.75.0/24" \
+    "162.249.76.0/24" \
+    "162.249.77.0/24" \
+    "162.249.78.0/24" \
+    "162.249.79.0/24" \
+    "185.40.64.0/24" \
+    "185.40.65.0/24" \
+    "185.40.66.0/24" \
+    "185.40.67.0/24" \
+)
+
+twitch=(
+	185.42.204.33
+)
+
+teamspeak=(
+	84.200.93.247 \
+)
+
+default_route_array=(
+	default
+)
+
+# Priority Maps
+
+priority_league=(
+	$LTE_3_NIC \
+	$LTE_2_NIC\
+	$ADSL_1_NIC \
+	$LTE_1_NIC
+)
+
+priority_teamspeak=(
+	$LTE_2_NIC \
+	$ADSL_1_NIC \
+	$LTE_3_NIC \
+	$ADSL_1_NIC
+)
+
+priority_twitch=(
+	$ADSL_1_NIC \
+	$LTE_1_NIC
+)
+
+priority_route=(
+	$LTE_1_NIC \
+	$ADSL_1_NIC
+)
+
+enableNIC() {
+
+	echo "Enabling $1 ..."
+
+	ip link set $1 up
+	up=`cat /sys/class/net/$1/carrier`
+	counter=20
+	echo "waiting for $1 to become up for $counter seconds...."
+	while [ "1" != "$up" ]
+	do
+		
+		counter=$((counter-1))
+
+		if [ $counter -eq 0 ]; then
+				error="Timed out while waiting for nic to come up!"
+				telegram-send $error
+				echo $error
+				exit -1
+		fi
+
+		echo "waiting for up....."
+		up=`cat /sys/class/net/$1/carrier`
+
+		sleep 1
+	done 
+
+}
+
+# $1 = Array, $2 = Array With IPs, $3 = Name, $4 = Place in udp route
+setUpRoute() {
+	declare -a nicArray=("${!1}")
+	declare -a ipArray=("${!2}")
+
+	echo "Trying to set up priority routing for $3 with canidates: (${nicArray[@]}))"
+	for nic in "${nicArray[@]}"; do
+		isPresent $nic
+		if [ $? -eq 0 ]; then
+
+			#Setup NAT
+
+			if [ -z $4 ]; then
+				setupNAT $nic
+				echo "Route $3 over $nic ( ${nicArray[@]} )"
+				setRoute "${configs[$nic]}" "$nic" ipArray[@]
+				telegramString+="$3 -> $nic
+				"
+			else
+				setupNAT $nic
+				echo "Route $3 over $nic ( ${nicArray[@]} )"
+				setRoute "${configs[$nic]}" "$nic" ipArray[@] "udp_routing_table"
+				telegramString+="$3 -> $nic [udp table]
+				"
+			fi
+
+
+			break
+		fi
+	done
+}
+
+# $1 = Array, $2 = Array With IPs, $3 = Name, $4 = Place in udp route
+tearDownRoute() {
+	declare -a nicArray=("${!1}")
+	declare -a ipArray=("${!2}")
+
+	echo "Trying to set up priority routing for $3 with canidates: (${nicArray[@]}))"
+	for nic in "${nicArray[@]}"; do
+		isPresent $nic
+		if [ $? -eq 0 ]; then
+			#Setup NAT
+
+			if [ -z $4 ]; then
+				setupNAT $nic
+				deleteRoute "${configs[$nic]}" "$nic" ipArray[@]
+			else
+				setupNAT $nic
+				deleteRoute "${configs[$nic]}" "$nic" ipArray[@] "udp_routing_table"
+			fi
+
+
+			break
+		fi
+	done
+}
+
+setRoute() {
+	
+	declare -a iArray=("${!3}")
+
+	for ip in "${iArray[@]}"
+	do
+		:
+		if [ -z $4 ]; then
+			echo "ip route add $ip via $1 dev $2"
+			ip route add $ip via $1 dev $2
+		else
+			echo "ip route add $ip via $1 dev $2 table $4"
+			ip route add $ip via $1 dev $2 table $4
+		fi
+	done
+}
+
+deleteRoute() {
+	declare -a iArray=("${!3}")
+	for ip in "${iArray[@]}"
+	do
+		:
+		if [ -z $4 ]; then
+			echo "ip route delete $ip via $1 dev $2"
+			ip route delete $ip via $1 dev $2
+		else
+			echo "ip route delete $ip via $1 dev $2 table $4"
+			ip route delete $ip via $1 dev $2 table $4
+		fi
+	done
+}
+
+delUDPRouting() {
+
+	#Save transmitted packets to have traffic history
+	dev=`ip route show table udp_routing_table | grep default | awk '{ print $5 }'`
+	traffic=`iptables -L -v -t mangle | egrep "MARK.* udp" | awk '{ print $2 }'`
+	echo "$dev $traffic" >> /home/bananapi/udp_bandwidth_history
+
+	ip route del 0/0 table udp_routing_table # Delete all default routes
+	ip rule delete fwmark 1 table udp_routing_table
+
+	iptables -D PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1
+}
+
+setupUDPRouting() {
+
+	printf "Check if udp_routing_table already exists..."
+
+	grep "udp_routing_table" /etc/iproute2/rt_tables > /dev/null
+
+	if [ $? -ne 0 ]; then
+		printf "...does not exist, gonna create it\n"
+		echo "201 udp_routing_table" >> /etc/iproute2/rt_tables
+	else 
+		printf "...yes\n"
+	fi
+
+	ip rule add fwmark 1 table udp_routing_table
+	ip route add default via $ADSL_1_NIC_GATEWAY dev $ADSL_1_NIC table udp_routing_table
+
+	#Check, if iptables rule is present
+	printf "Check if iptables mark rule already exists..."
+	iptables -C PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1 2>&1 > /dev/null
+	
+	if [ $? -ne 0 ]; then
+		printf "...does not exist, gonna create it\n"
+		iptables -A PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1
+	else
+		printf "..yes\n"
+	fi
+
+}
+
+notify() { 
+	telegram-send $1
+} 
+
+#Removes all routing entries previously set
+purgeTable() {
+	echo "Clean up current routes"
+
+	#Clear everything here because we own this table and nothing could break if we delete everything
+	ip route flush table udp_routing_table
+
+	#League
+
+	tearDownRoute priority_league[@] league[@] "League" udp
+
+	#Twitch
+
+	tearDownRoute priority_twitch[@] twitch[@] "Twitch"
+
+	#Teamspeak
+
+	# tearDownRoute priority_teamspeak[@] teamspeak[@] "Teamspeak"
+
+	#Default Route
+
+	tearDownRoute priority_route[@] default_route_array[@]  "Default Route"
+} 
+
+# Check if network adapter is currently plugged in
+isPresent() {
+	ip link show $1 | grep "state" > /dev/null
+	res=$?
+	if [ -d "$NET_DIR/$1" ] && [ $res -eq 0 ]; then
+		echo "${1} is present"
+		return 0
+	else
+		return 1
+	fi
+} 
+
+setDefaultRoute() {
+	ip route add default via $1 dev $2	
+}
+
+setupNAT() {
+	 echo "Setup NAT for $1"
+	 iptables -t nat -A POSTROUTING -o $1 -j MASQUERADE
+}
+
+telegram-send "Network Change detected..."
+
+sleep 1
+
+for pid in $(pidof -x setupNetworking.sh); do
+    if [ $pid != $$ ]; then
+        echo "[$(date)] : setupNetworking.sh : Process is already running with PID $pid"
+        kill $pid
+    fi
+done
+
+#Assigns the passed interface an ip address, if it does not already have one,
+for nic in "${interfaces[@]}"; do
+	isPresent $nic
+	if [ $? -eq 0 ]; then
+		enableNIC $nic
+	fi
+
+	ip addr show dev $nic | grep "inet "
+	if [ $? -ne 0 ]
+	then
+		echo "ip addr add ${ips[$nic]} dev $nic"
+		ip addr add "${ips[$nic]}" dev $nic
+	fi	
+	
+done
+
+sleep 1
+
+purgeTable
+
+delUDPRouting
+
+if [ $USE_UDP_ROUTING -eq 1 ]; then
+	echo "Using hard UDP routing, will route all udp packets over one NIC"
+	setupUDPRouting
+else
+	echo "Will NOT use udp routing"
+fi
+
+
+default=eth0
+
+#Default Route
+
+ip route delete default
+
+setUpRoute priority_route[@] default_route_array[@]  "Default Route"
+
+#League
+
+setUpRoute priority_league[@] league[@] "League" udp
+
+#Twitch
+
+setUpRoute priority_twitch[@] twitch[@] "Twitch"
+
+#Teamspeak
+
+# setUpRoute priority_teamspeak[@] teamspeak[@] "Teamspeak"
+
+sleep 1
+
+echo "Setup:"
+
+iptables -nvL -t mangle
+
+printf "\n UDP Routing Table:\n\n"
+
+ip route show table udp_routing_table
+
+printf "\n Routing Table:\n\n"
+
+ip route show
+
+entrycount=$(ip route show table udp_routing_table | wc -l)
+
+telegram-send "Routes changed:
+ ${telegramString}
+ UDP Table Entries: ${entrycount}
+"
+
+echo "Setup ended"

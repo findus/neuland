@@ -1,0 +1,16 @@
+[Unit]
+Description=ifup for %I
+After=local-fs.target network-pre.target apparmor.service systemd-sysctl.service
+Before=network.target shutdown.target network-online.target
+Conflicts=shutdown.target
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device
+DefaultDependencies=no
+IgnoreOnIsolate=yes
+
+[Service]
+Slice=system.slice
+ExecStart=/bin/sh -ec '/opt/net/setupNetworking'
+ExecStop=/bin/sh -ec '/opt/net/setupNetworking'
+RemainAfterExit=true
+TimeoutStartSec=5min

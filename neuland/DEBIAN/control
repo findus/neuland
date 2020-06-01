@@ -1,0 +1,8 @@
+Package: neuland
+Version: 0.1
+Section: custom
+Priority: optional 
+Architecture: all
+Essential: no
+Maintainer: f1ndus.de
+Description: Reroutes network traffic based on connected devices and ules
