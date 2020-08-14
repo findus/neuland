@@ -38,8 +38,6 @@ ips[$LTE_1_NIC]="172.20.10.2/28"
 ips[$LTE_2_NIC]="172.20.10.4/28"
 ips[$ADSL_1_NIC]="192.168.178.46/24"
 
-UDP_MAIN_DEVICE="vodafone"
-
 telegramString=""
 
 #NICS
@@ -52,11 +50,13 @@ interfaces=(
 
 #Priorities for udp
 udprpios=(
-	$LTE_3_NIC \
 	$LTE_2_NIC\
+	$LTE_3_NIC \
+	$LTE_1_NIC\
 	$ADSL_1_NIC \
-	$LTE_1_NIC
 )
+
+UDP_MAIN_DEVICE=""
 
 #IP Ranges for routing
 
@@ -347,6 +347,22 @@ for nic in "${interfaces[@]}"; do
 	fi	
 	
 done
+
+#Sets nic that will be used for realtime traffic
+for nic in "${udprpios[@]}"; do
+	isPresent $nic
+	if [ $? -eq 0 ]; then
+		echo "Using $nic for realtime traffic"
+		UDP_MAIN_DEVICE=$nic
+		break
+	fi
+done
+
+if [ -z "$UDP_MAIN_DEVICE" ]; then
+	echo "No Interace that is suitable for realtime traffic is up!"
+	exit -1
+fi
+
 
 sleep 1
 
