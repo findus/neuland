@@ -2,6 +2,7 @@
 #Prios
 #League IPs = congstar, vodafone, eth0
 #Twitch IPs = eth0, funk
+
 #TS = vodafone, funk, eth0
 #Default Route = funk, eth0
 
@@ -19,6 +20,7 @@ APPLE_GATEWAY=172.20.10.1
 ADSL_1_NIC_GATEWAY=192.168.178.1
 HOME_SUBNET=192.168.178.0
 
+INPUT_NIC=eth0
 LTE_3_NIC=congstar
 LTE_1_NIC=funk
 LTE_2_NIC=vodafone
@@ -35,6 +37,8 @@ ips[$LTE_3_NIC]="172.20.10.5/28"
 ips[$LTE_1_NIC]="172.20.10.2/28"
 ips[$LTE_2_NIC]="172.20.10.4/28"
 ips[$ADSL_1_NIC]="192.168.178.46/24"
+
+UDP_MAIN_DEVICE="vodafone"
 
 telegramString=""
 
@@ -236,7 +240,7 @@ delUDPRouting() {
 	ip route del 0/0 table udp_routing_table # Delete all default routes
 	ip rule delete fwmark 1 table udp_routing_table
 
-	iptables -D PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1
+	iptables -D PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1
 }
 
 setupUDPRouting() {
@@ -253,15 +257,15 @@ setupUDPRouting() {
 	fi
 
 	ip rule add fwmark 1 table udp_routing_table
-	ip route add default via $ADSL_1_NIC_GATEWAY dev $ADSL_1_NIC table udp_routing_table
+	ip route add default via ${configs[$UDP_MAIN_DEVICE]} dev $UDP_MAIN_DEVICE table udp_routing_table
 
 	#Check, if iptables rule is present
 	printf "Check if iptables mark rule already exists..."
-	iptables -C PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1 2>&1 > /dev/null
+	iptables -C PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1 2>&1 > /dev/null
 	
 	if [ $? -ne 0 ]; then
 		printf "...does not exist, gonna create it\n"
-		iptables -A PREROUTING -s ${HOME_SUBNET}/24  -i $ADSL_1_NIC -t mangle -p udp -j MARK --set-mark 1
+		iptables -A PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1
 	else
 		printf "..yes\n"
 	fi
@@ -365,6 +369,7 @@ default=eth0
 ip route delete default
 
 setUpRoute priority_route[@] default_route_array[@]  "Default Route"
+
 
 #League
 
