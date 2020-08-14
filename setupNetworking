@@ -92,25 +92,21 @@ default_route_array=(
 priority_league=(
 	$LTE_3_NIC \
 	$LTE_2_NIC\
-	$ADSL_1_NIC \
 	$LTE_1_NIC
 )
 
 priority_teamspeak=(
 	$LTE_2_NIC \
-	$ADSL_1_NIC \
 	$LTE_3_NIC \
 	$ADSL_1_NIC
 )
 
 priority_twitch=(
-	$ADSL_1_NIC \
 	$LTE_1_NIC
 )
 
 priority_route=(
 	$LTE_1_NIC \
-	$ADSL_1_NIC
 )
 
 enableNIC() {
