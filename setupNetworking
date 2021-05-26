@@ -236,7 +236,7 @@ delUDPRouting() {
 	ip route del 0/0 table udp_routing_table # Delete all default routes
 	ip rule delete fwmark 1 table udp_routing_table
 
-	iptables -D PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1
+	iptables -D PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK ! --dport 443 --set-mark 1
 }
 
 setupUDPRouting() {
@@ -257,11 +257,11 @@ setupUDPRouting() {
 
 	#Check, if iptables rule is present
 	printf "Check if iptables mark rule already exists..."
-	iptables -C PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1 2>&1 > /dev/null
+	iptables -C PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK ! --dport 443 --set-mark 1 2>&1 > /dev/null
 	
 	if [ $? -ne 0 ]; then
 		printf "...does not exist, gonna create it\n"
-		iptables -A PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp -j MARK --set-mark 1
+		iptables -A PREROUTING -s ${HOME_SUBNET}/24  -i $INPUT_NIC -t mangle -p udp ! --dport 443 -j MARK --set-mark 1
 	else
 		printf "..yes\n"
 	fi
